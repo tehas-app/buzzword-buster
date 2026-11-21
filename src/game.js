@@ -9,13 +9,28 @@ const { words, source } = wordsFrom(location.search);
 
 const ROUND_SECONDS = 45;
 const BALLS = 3;
+// The speed of the ball on a wall that is whole (ball-speed.js). stepGame()
+// writes it into the ball at the top of every frame it plays, times how far
+// that wall has cleared, so a piece left of the wall is worth its own step and
+// the last piece goes at 1.5 times these speeds. The ramp is the wall's, so the
+// ball's own turns below read a direction, never a magnitude, and no one of
+// them can quiet the ramp or add a step of its own to it.
+const BALL_VX = 145, BALL_VY = -175;
 
 const canvas = $("brick-canvas");
 const ctx = canvas.getContext("2d");
 const W = canvas.width, H = canvas.height;
-const game = { mode: "ready", score: 0, lives: BALLS, time: ROUND_SECONDS, paddleX: W / 2, paddleW: 72, x: W / 2, y: H - 40, vx: 145, vy: -175, bricks: [] };
+const game = { mode: "ready", score: 0, lives: BALLS, time: ROUND_SECONDS, paddleX: W / 2, paddleW: 72, x: W / 2, y: H - 40, vx: BALL_VX, vy: BALL_VY, bricks: [], pieces: 0 };
 let last = performance.now(), leftHeld = false, rightHeld = false;
 let debris = [], paddleFlash = 0;
+
+// The ball's velocity as the wall stands right now: the starting velocity times
+// the one factor ball-speed.js gives for the pieces left. The direction of the
+// ball is left to the ball, so the paddle bounce and the wall's own geometry are
+// untouched by the ramp.
+function ballSpeed() {
+  return window.BUZZ_BALL_SPEED.speedFactor(game.bricks.filter((b) => b.alive).length, game.pieces);
+}
 
 function gameUi(message) {
   $("brick-score").textContent = String(game.score).padStart(3, "0");
@@ -28,10 +43,16 @@ function gameUi(message) {
 }
 
 function resetGame() {
-  Object.assign(game, { mode: "ready", score: 0, lives: BALLS, time: ROUND_SECONDS, paddleX: W / 2, x: W / 2, y: H - 40, vx: 145, vy: -175 });
+  Object.assign(game, { mode: "ready", score: 0, lives: BALLS, time: ROUND_SECONDS, paddleX: W / 2, x: W / 2, y: H - 40, vx: BALL_VX, vy: BALL_VY });
   // A new wall every round: other words, other tetrominoes, other places, and
   // never more pieces than the wall has room for (brick-wall.js).
   game.bricks = window.BUZZ_BRICK_WALL.build(words).map((piece) => ({ ...piece, alive: true }));
+  // The wall this round is measured against: a small pool makes a smaller wall,
+  // and its last piece is as fast as a full wall's (ball-speed.js).
+  game.pieces = game.bricks.length;
+  // A whole wall is the starting speed exactly, whatever direction the ball was
+  // left travelling in when the round before this one ended.
+  game.vx = BALL_VX; game.vy = BALL_VY;
   $("brick-word").textContent = "NO WORD BUSTED YET";
   gameUi(`${ROUND_SECONDS} seconds, ${BALLS} balls.`);
 }
@@ -49,6 +70,14 @@ function toggleGame() {
 function stepGame(dt) {
   game.time = Math.max(0, game.time - dt);
   if (game.time === 0) return endGame("Time is up.");
+  // How fast this ball travels is the wall's, not the ball's: the speed is
+  // written into the ball from the pieces left at the top of every frame, so
+  // the ramp is felt while the ball flies and not only when the next one is
+  // launched. The turns below read a direction out of what is written here,
+  // which is why the wall's factor survives all of them.
+  const speed = ballSpeed();
+  game.vx = BALL_VX * speed;
+  game.vy = BALL_VY * speed;
   const half = game.paddleW / 2;
   game.paddleX = Math.max(half + 8, Math.min(W - half - 8, game.paddleX + (Number(rightHeld) - Number(leftHeld)) * 270 * dt));
   game.x += game.vx * dt;
@@ -87,7 +116,9 @@ function stepGame(dt) {
   if (game.y > H + 8) {
     game.lives--;
     if (game.lives <= 0) return endGame("Out of balls.");
-    Object.assign(game, { x: game.paddleX, y: H - 40, vx: (Math.random() < 0.5 ? -1 : 1) * 145, vy: -175 });
+    // Only the ball's place is set here: its speed is the wall's, and the next
+    // frame reads it from the pieces that are still up (ball-speed.js).
+    Object.assign(game, { x: game.paddleX, y: H - 40 });
   }
   if (game.bricks.every((b) => !b.alive)) return endGame("Wall cleared.");
   gameUi();
