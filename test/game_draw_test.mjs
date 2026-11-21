@@ -65,21 +65,26 @@ const W = 480, H = 272;
 // drawn at.
 const START = { x: W / 2, y: H - 40, vx: 145, vy: -175 };
 const TICK = 0.04;
+const BALLS = 3; // the balls a round starts with, as the loop counts them
 const PADDLE = { w: 72, h: 8, y: H - 32 };
 // The ball's own 4 px: the half extent it collides with, and the radius it is
 // drawn with, which are the same number because the ball is drawn as big as
 // the box it bounces with. The page starts with them as one 8 px footprint.
 const EXTENT = 4;
-const CELL = 28; // a wall cell, and the letter it carries
 // An hour on the clock before a round is begun, so no frame below is the frame
 // that runs the round's clock out.
 const HOUR = 3600e3;
 
-// A round in progress, with the clock at whole seconds so no frame of these
-// ends it: the rules the frames are drawn under, not rules they are checked by.
-const RUNNING = { mode: "playing", score: 0, lives: 3, time: 40, paddleX: W / 2, paddleW: 72 };
-// The ball at the start of a round, a tick short of the floor.
-const FALLING = { x: START.x, y: START.y, vx: START.vx, vy: START.vy };
+// A round in progress: the rules the frames are drawn under, not rules they are
+// checked by. Its clock sits at whole seconds so no frame of these ends it, and
+// its balls are counted out here rather than left to whatever the loop happens to
+// hold — a frame that wants the end of a round says so itself, and a count carried
+// by the ball below would quietly overrule that.
+const RUNNING = { mode: "playing", score: 0, time: 40, paddleX: W / 2, paddleW: 72 };
+// The ball at the start of a round, a tick short of the floor, with the balls the
+// round starts with in hand. The direction the loop sends a new ball is its own
+// coin (game.js:95), held by the rig; the speed is not.
+const FALLING = { x: START.x, y: START.y, vx: START.vx, vy: START.vy, lives: BALLS };
 
 // A canvas 2d context that keeps every shape it was asked to paint.
 function recordingContext() {
@@ -126,7 +131,16 @@ async function aFrame({ standing = wall, ball = FALLING } = {}) {
   };
   // The face the canvas paints with arrives a moment after the page, and the
   // round begins when it does — the page's own start, not one invented here.
+  // The coin the round flips when it puts a lost ball back is held here too: the
+  // loop sends that ball left or right by Math.random (game.js:95), so a frame
+  // that reads the direction a lost ball comes back with would read the flip as
+  // well. Held below the loop's half, it always sends the ball to the left, at
+  // -145, so the direction read below means the round's speed and not this file's
+  // luck. Every other call to Math.random is left alone: brick-wall.js is handed
+  // its own seed, so nothing else in a round rolls.
   let fontLoaded;
+  const flip = globalThis.Math.random;
+  globalThis.Math.random = () => 0;
   globalThis.document = {
     getElementById: (id) => (id === canvas.id ? canvas : element(id)),
     createElement: () => element("created"),
@@ -193,8 +207,17 @@ async function aFrame({ standing = wall, ball = FALLING } = {}) {
     // which is the largest step the loop ever takes.
     clock.now += TICK * 1000;
     again(clock.now);
+    // The loop asks for its next frame from inside the one just answered. Nothing
+    // here runs an animation, so that request is dropped as well: left standing,
+    // it would be taken up after this file handed the round back, and would step
+    // the round a second time — quietly, after the assertions had been read. The
+    // request is answered through a microtask, so the drop is done after one has
+    // run, and the round is left with nothing owed to it.
+    await new Promise((done) => setImmediate(done));
+    frames.length = 0;
   } finally {
     globalThis.performance = perf;
+    globalThis.Math.random = flip;
   }
   return { calls, canvas, game, drawn };
 }
@@ -278,6 +301,23 @@ test("the ball still moves at the speed it always had", async () => {
   assert.equal(shown(game.x), shown(START.x + START.vx * TICK), "and the round itself moved 5.8 px across");
 });
 
+test("the round starts and restarts its ball at the speed it always had", () => {
+  // The speed is written into the loop three times: the state the round is born
+  // with, the reset that begins one, and the respawn that replaces a lost ball.
+  // The frames above read each of those speeds in motion; this reads the two
+  // literals beside them, so a speed changed at one of them and left at the other
+  // cannot answer for it. The third is read where a lost ball is put back.
+  const born = gameCode.match(/const game = \{[^}]*vx: (-?\d+), vy: (-?\d+)[^}]*\}/);
+  assert.ok(born, "the round is born with a ball of a stated speed");
+  assert.equal(Number(born[1]), 145, "across at 145 px/s as it has always been");
+  assert.equal(Number(born[2]), -175, "and up at 175 px/s");
+  const reset = gameCode.match(/function resetGame\(\) \{[\s\S]*?Object\.assign\(game, \{([^}]*)\}\)/);
+  assert.ok(reset, "a new round resets the ball to a stated speed");
+  assert.match(reset[1], /vx: 145, vy: -175/, "at the same speed the round is born with");
+  assert.doesNotMatch(reset[1], /vx: (?!145)-?\d+|vy: (?!-175)-?\d+/,
+    "and nothing else, which is what lets the two be read as one speed");
+});
+
 test("a ball sent up at a piece turns back, and keeps its speed", async () => {
   // A cell of the wall the round really hangs, directly above the ball, and
   // the ball sent up at it from one ball-box and one tick below its underside.
@@ -296,7 +336,7 @@ test("a ball sent up at a piece turns back, and keeps its speed", async () => {
   assert.equal(shown(game.y - (cell.y + cell.h)), EXTENT,
     "the ball stopped one ball-box below the underside, its box flush against the cell");
   assert.ok(start - game.y > 0, "which is below where it was sent up from");
-  assert.equal(shown(Math.abs(game.vy)), 175, "and it is still moving up or down at 175 px/s");
+  assert.equal(shown(game.vy), -175, "and it is still coming back down at 175 px/s, in the direction it turned to");
   // The ball is drawn as the disc, at the place the round has it: 4 px clear of
   // the cell's underside, which is where the box that hit it puts its centre.
   const ball = where(calls);
@@ -320,28 +360,41 @@ test("the ball is drawn as a disc where the wall has gone", async () => {
 });
 
 test("the ball still turns back off the side of a piece, and off the walls", async () => {
-  // Off the side of a cell: the ball runs at it from the left and comes back the
-  // way it came, having crossed to the reach of its own 4 px. Only that one
-  // piece of the wall stands, so the cell it meets is the one named here.
+  // Off the side of a cell: the ball runs at it from the clear air on its left and
+  // is turned back. Only that one piece of the wall stands, so the cell it meets
+  // is the one named here. The turn is read in both directions, because the rule
+  // that chooses it (the shallower of the two overlaps at game.js:80) decides which
+  // axis flips: a frame that only saw the ball stop where its box is flush would
+  // also pass with the wrong axis flipped and the ball still running into the cell,
+  // since one tick of 145 px/s is well inside the 4 px of that flush.
   const side = wall.find((b) => b.rects.some((r) => r.x === globalThis.BUZZ_BRICK_WALL.LEFT));
   const cell = side.rects.reduce((a, b) => (b.y > a.y ? b : a));
-  const from = cell.x - EXTENT - 145 * TICK; // one box and one tick clear of the cell's left edge
+  const from = cell.x + cell.w - EXTENT - 145 * TICK; // a tick short of flush with the cell's right edge
   const sideways = await aFrame({
     standing: [side],
     ball: { x: from, y: cell.y + cell.h / 2, vx: 145, vy: 0 },
   });
-  assert.equal(shown(sideways.game.x - (cell.x - EXTENT)), 0,
+  assert.equal(shown(sideways.game.x - (cell.x + cell.w - EXTENT)), 0,
     "the ball stopped with its box flush against the side of the cell");
   assert.ok(sideways.game.x > from, "and it ran to the cell before turning");
+  assert.ok(sideways.game.vx < 0, "and it turned back the way it came, sideways and not up");
+  assert.equal(shown(Math.abs(sideways.game.vy)), 0, "leaving its sideways speed still at nothing");
 
   // Off the walls, which are not pieces at all and are unchanged by the ball's
-  // shape: the ball is put past a wall, and the frame puts it back at it.
-  const left = await aFrame({ standing: [], ball: { ...FALLING, x: 2, y: 100 } });
+  // shape: the ball is put past a wall, and the frame puts it back at it. Each is
+  // put there still travelling into the wall, since a wall both stops the ball at
+  // itself and turns it out of the wall, and a frame drawn with the ball already
+  // travelling outward would pass on the stop alone. Each is also put well clear of
+  // the floor, so the frame shows a wall turning a ball and nothing else.
+  const left = await aFrame({ standing: [], ball: { ...FALLING, x: 2, y: 100, vx: -START.vx } });
   assert.equal(shown(where(left.calls).args[0]), 8, "the left wall is 8 px in, as it was");
-  const right = await aFrame({ standing: [], ball: { ...FALLING, x: W - 2, y: 100 } });
+  assert.ok(left.game.vx > 0, "and turns the ball back into the field from the left");
+  const right = await aFrame({ standing: [], ball: { ...FALLING, x: W - 2, y: 100, vx: START.vx } });
   assert.equal(shown(where(right.calls).args[0]), W - 8, "the right wall is 8 px from the edge");
-  const top = await aFrame({ standing: [], ball: { ...FALLING, x: 240, y: 2 } });
+  assert.ok(right.game.vx < 0, "and from the right");
+  const top = await aFrame({ standing: [], ball: { ...FALLING, x: 240, y: 2, vy: START.vy } });
   assert.equal(shown(where(top.calls).args[1]), 8, "the top of the canvas is 8 px down");
+  assert.ok(top.game.vy > 0, "and turns the ball back down into the field");
 });
 
 test("the paddle is still a square, still has its shadow, and still catches", async () => {
@@ -367,13 +420,43 @@ test("a ball that comes down on the paddle goes back up, thrown by where it hit"
   // what the player sees. None of it is about the ball's shape.
   const { calls, game } = await aFrame({ standing: [], ball: { x: W / 2 - 18, y: PADDLE.y - EXTENT, vx: 0, vy: 175 } });
   assert.equal(shown(game.y), PADDLE.y, "the catch set the ball to the top of the paddle");
-  assert.ok(game.vy < 0, "and turned it around");
+  assert.equal(shown(game.vy), -175, "and turned it around, at the speed it came down with");
   assert.ok(game.vx < 0, "and threw it to the side of the paddle it hit");
   // The picture of it: the ball is painted where the catch puts it, at the top
   // of the paddle and no further down than the paddle's own rectangle.
   const ball = where(calls);
   assert.equal(shown(ball.args[1]), shown(game.y), "the ball is drawn where the round has it");
   assert.ok(ball.args[1] <= PADDLE.y + PADDLE.h, "and no lower than the paddle it was caught on");
+});
+
+test("a ball lost off the bottom comes back with the speed it always had", async () => {
+  // A ball lost off the bottom, with one more in hand. Two things have to be true
+  // for the round to lose one in a single frame, since the loop steps the ball
+  // before it looks for a lost one: the ball must end the step below the floor, and
+  // it must end it beyond the paddle's reach — 40 px either side of the paddle's
+  // centre — or the paddle catches it on the way and the round never loses it.
+  // Hence x 400 with the paddle at the middle of the field, and 900 px/s down: at
+  // 175 the step only reaches 251, which is neither below the floor nor clear of
+  // the paddle.
+  //
+  // One more ball is held because the round ends itself on the last one it loses
+  // (game.js:94) and never puts that one back: a frame with a single ball in hand
+  // shows the round over and the ball left where it fell, which is the round's
+  // doing but not the thing this frame is here to read.
+  //
+  // The lost ball then comes back where a round starts one, at the paddle 32 px
+  // above the floor, up at 175 px/s and across at 145. That speed is read nowhere
+  // else: only a lost ball is put back, and a round that never lost one keeps the
+  // ball it had. The direction across is the loop's own coin (game.js:95), held by
+  // the rig; the speed, the place and the fact that it was put back at all are not.
+  const { calls, game } = await aFrame({ standing: [], ball: { x: 400, y: H + 2, vx: 0, vy: 900, lives: 2 } });
+  assert.equal(shown(game.lives), 1, "the round lost a ball, which is the only thing that puts one back");
+  assert.equal(shown(game.y), H - 40, "the ball was lost and put back where a round starts one");
+  assert.equal(shown(game.x), W / 2, "at the paddle it starts a round on, and not where it was lost");
+  assert.equal(shown(game.vy), -175, "the ball comes back up at the speed it always had");
+  assert.equal(shown(game.vx), -145, "and across at the speed it always had, to the side the loop's coin held");
+  assert.equal(where(calls).name, "arc", "and it is drawn as the same disc");
+  assert.equal(shown(where(calls).args[2]), EXTENT, "of the same radius");
 });
 
 test("the wall, its shadows, its letters and the floor are all still rectangles", async () => {
