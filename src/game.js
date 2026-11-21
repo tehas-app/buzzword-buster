@@ -10,6 +10,11 @@ const { words, source } = wordsFrom(location.search);
 const ROUND_SECONDS = 45;
 const BALLS = 3;
 
+// The canvas of the cabinet: 480 by 272 pixels, which the page scales up. How
+// it is scaled is asked of the whole canvas once, in game.css — image-rendering
+// there is what lets the ball's anti-aliased edge arrive on screen as a curve
+// rather than a staircase. This file writes no rule of its own onto the canvas:
+// an inline rule would beat the page's, and the ball would be flattened again.
 const canvas = $("brick-canvas");
 const ctx = canvas.getContext("2d");
 const W = canvas.width, H = canvas.height;
@@ -127,8 +132,17 @@ function drawGame() {
     ctx.fillStyle = paint(d.color);
     ctx.fillRect(Math.round(d.x / 4) * 4, Math.round(d.y / 4) * 4, 4, 4);
   }
+  // The ball is a disc of radius 4 — the same 8 px footprint the square filled,
+  // and the same centre it was drawn about, since the box it collides with is
+  // 4 px about that centre. Its edge is anti-aliased by the canvas, and the page
+  // scales this buffer with smoothing (game.css) so that softness reaches the
+  // screen as a curve instead of being copied back into blocks. The squares of
+  // the wall above keep their hard edges: they are drawn whole, at the buffer's
+  // own scale, and smoothing only ever asks how the finished buffer is shown.
   ctx.fillStyle = paint("game-ball");
-  ctx.fillRect(Math.round(game.x) - 4, Math.round(game.y) - 4, 8, 8);
+  ctx.beginPath();
+  ctx.arc(Math.round(game.x), Math.round(game.y), 4, 0, Math.PI * 2);
+  ctx.fill();
   if (game.mode !== "playing") {
     const label = game.mode === "over" ? "ROUND OVER" : game.mode === "paused" ? "PAUSED" : "BUZZWORD BUSTER";
     ctx.fillStyle = paint("game-ground");
@@ -182,3 +196,8 @@ if (source === "address") {
 // The font is a bitmap face the canvas draws with: wait for it, or the first
 // frames are drawn in the fallback.
 document.fonts.load("16px Topaz").finally(() => { resetGame(); requestAnimationFrame(frame); });
+
+// The round and the canvas it is painted on, for the drawing test, which reads
+// both from outside: what the loop holds, and the element whose scaling the page
+// has to get right. The page itself never reads either back.
+globalThis.__buzzDraw = { game, canvas };

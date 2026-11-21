@@ -74,7 +74,12 @@ button { font: inherit; color: inherit; }
   height: auto;
   aspect-ratio: 480 / 272;
   margin: 4px;
-  image-rendering: pixelated;
+  /* The buffer is shown bigger than the 480 by 272 it is drawn at, and the
+     ball is the one soft thing in it: smoothing is what lets its anti-aliased
+     edge read as a circle. The pixels the game draws itself — the letters of
+     the wall above all — keep the whole-pixel rule, which game.js sets on the
+     canvas it paints. */
+  image-rendering: smooth;
   touch-action: none;
   background: var(--screen);
 }
