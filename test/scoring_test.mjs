@@ -11,11 +11,11 @@ import { test } from "node:test";
 import {
   COMBO_LINE,
   COMBO_POINTS,
+  COUNT_MAX,
   WORD_LINE,
   WORD_POINTS,
   createScoring,
   lineFor,
-  scoreWord,
 } from "../src/scoring.js";
 
 // A round's worth of pieces, in the order the ball takes them off the wall:
@@ -243,15 +243,89 @@ test("the word line is text for textContent, never markup", () => {
   assert.equal(line, `COMBO: ${nasty.toUpperCase()} (1×)`);
 });
 
-test("points that are not a plain positive number are worth nothing", () => {
-  assert.equal(scoreWord({ busted: true, points: 7 }), 7);
-  assert.equal(scoreWord({ busted: true, points: NaN }), 0);
-  assert.equal(scoreWord({ busted: true, points: -5 }), 0);
-  assert.equal(scoreWord({ busted: true, points: Infinity }), 0);
-  assert.equal(scoreWord({ busted: true, points: "lots" }), 0);
-  assert.equal(scoreWord({ busted: false, combo: true }), 0, "no score without a bust");
-  assert.equal(scoreWord(), 0);
-  assert.equal(scoreWord({}), 0);
+test("a hit that busts no word is worth nothing", () => {
+  const t = createScoring();
+  flight(t);
+  t.pieceBusted("pivot", false, { word: "pivot", count: 3 });
+  assert.equal(t.pieceBusted("pivot", false, { word: "pivot", count: 3 }).points, 0,
+    "only the last piece of the word scores");
+  const fresh = createScoring();
+  flight(fresh);
+  assert.equal(fresh.pieceBusted("pivot", true, { word: "pivot", count: 3 }).points, COMBO_POINTS);
+  // The same wordKey reported again after it is already off the wall.
+  assert.equal(fresh.pieceBusted("pivot", true, { word: "pivot", count: 3 }).points, 0);
+});
+
+test("the word line has a longest case: no count, however repeated in the address, outgrows it", () => {
+  // words.js sums a repeated ?words= word without a ceiling (500 repeats of one
+  // word give count 500), so this is the one place the readout can be bounded —
+  // the way the score and time readouts are bounded at their render sites.
+  // Longest case: the 10 letters WORD_LEN allows, plus the loudest count.
+  const longest = lineFor(true, "0123456789", COUNT_MAX);
+  assert.equal(longest, "COMBO: 0123456789 (99×)");
+  for (const count of [1e6, COUNT_MAX + 1, COUNT_MAX, 3, 1, 0, -4, "lots", null, undefined]) {
+    assert.ok(lineFor(true, "synergy", count).length <= longest.length,
+      `${count} does not outgrow the longest line`);
+    assert.ok(/\(\d{1,2}×\)$/.test(lineFor(true, "synergy", count)), `${count} renders as one or two digits`);
+  }
+  assert.equal(lineFor(true, "pivot", 1e6), `COMBO: PIVOT (${COUNT_MAX}×)`);
+  assert.equal(lineFor(false, "pivot", 0), "BUSTED: PIVOT (1×)", "and it never says zero");
+
+  const t = createScoring();
+  flight(t);
+  assert.equal(t.pieceBusted("pivot", true, { word: "pivot", count: 500 }).line,
+    `COMBO: PIVOT (${COUNT_MAX}×)`, "the bound holds through pieceBusted()");
+});
+
+test("the tracker answers the whole surface game.js reports", () => {
+  // Every event game.js reports, driven in the order the loop reports them, with
+  // the tracker's state asserted on both sides of each: paddle bounce, then the
+  // run that ends with the ball past the paddle instead of on the paddle.
+  const t = createScoring();
+  t.reset(); // resetGame(): a new wall and a new ball
+  assert.equal(t.combo, true, "the round is served with the ball in the air");
+  t.pieceBusted("synergy", false, { word: "synergy", count: 14 });
+  assert.equal(t.combo, true, "a piece busted does not by itself end the run");
+  t.paddleTouched(); // the loop's bounce branch
+  assert.equal(t.combo, false, "the bounce ends the run whether or not the ball was in that branch");
+  t.paddleTouched(); // a bounce with nothing in flight is not an error
+  assert.equal(t.combo, false);
+  t.ballInPlay(); // the loop's ball-lost branch serves the next ball...
+  assert.equal(t.combo, true);
+  t.pieceBusted("synergy", false, { word: "synergy", count: 14 });
+  t.ballLost(); // ... and the same ball goes past the paddle rather than bouncing
+  assert.equal(t.combo, false, "a lost ball ends the run the bounce would have ended");
+  assert.equal(t.pieceBusted("synergy", true, { word: "synergy", count: 14 }).points, WORD_POINTS,
+    "and the word it had started is an ordinary bust");
+  t.reset(); // PLAY AGAIN: no word and no combo carries over
+  assert.equal(t.combo, true);
+  assert.equal(t.pieceBusted("synergy", true, { word: "synergy", count: 14 }).points, COMBO_POINTS);
+});
+
+test("reset() is what separates two rounds: wordKey is the same number again next wall", () => {
+  // brick-wall.js numbers words by their index in that wall's own shuffled list
+  // (brick-wall.js: wordKey: wi), so wordKey 0 is a different word every round.
+  // A tracker still holding the last wall's `busted` set drops the new wall's
+  // word 0 and it scores nothing — reset() is the only thing that clears it.
+  const stale = createScoring();
+  stale.reset();
+  stale.pieceBusted(0, false, { word: "synergy", count: 1 });
+  assert.equal(stale.pieceBusted(0, true, { word: "synergy", count: 1 }).points, COMBO_POINTS, "round one, wordKey 0");
+  stale.ballLost(); // the next ball of the same round — only reset() ends a round
+  stale.ballInPlay();
+  stale.pieceBusted(0, false, { word: "pivot", count: 1 });
+  assert.equal(stale.pieceBusted(0, true, { word: "pivot", count: 1 }).points, 0,
+    "the new wall's word 0 is silently dropped without reset()");
+
+  const reset = createScoring();
+  reset.reset();
+  reset.pieceBusted(0, false, { word: "synergy", count: 1 });
+  reset.pieceBusted(0, true, { word: "synergy", count: 1 });
+  reset.reset(); // the only thing separating this wall from the one above
+  reset.pieceBusted(0, false, { word: "pivot", count: 1 });
+  assert.deepEqual(reset.pieceBusted(0, true, { word: "pivot", count: 1 }),
+    { busted: true, combo: true, points: COMBO_POINTS, word: "pivot", line: "COMBO: PIVOT (1×)" },
+    "the same wordKey from the new wall is still a bust — which is why game.js resets beside the wall build");
 });
 
 test("scoring.js is pure: no DOM, no clock, no randomness", () => {

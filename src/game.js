@@ -36,7 +36,10 @@ function resetGame() {
   // A new wall every round: other words, other tetrominoes, other places, and
   // never more pieces than the wall has room for (brick-wall.js).
   game.bricks = window.BUZZ_BRICK_WALL.build(words).map((piece) => ({ ...piece, alive: true }));
-  scoring.reset(); // a new wall, a new ball, no combo carried over from the last round
+  // wordKey is an index into this wall's own word list, so it recurs every
+  // round: the tracker that reads it is reset with the wall it scores, in this
+  // one function, so a bust of the new wall cannot be swallowed by the last one.
+  scoring.reset(); // and the ball of the new round is off the paddle, so its first word can combo
   $("brick-word").textContent = "NO WORD BUSTED YET";
   gameUi(`${ROUND_SECONDS} seconds, ${BALLS} balls.`);
 }
@@ -64,7 +67,7 @@ function stepGame(dt) {
   if (game.vy > 0 && game.y >= H - 32 && game.y <= H - 16 && Math.abs(game.x - game.paddleX) < half + 4) {
     game.y = H - 32;
     paddleFlash = 0.08;
-    scoring.paddleTouched(); // any run of pieces before this bounce is over
+    scoring.paddleTouched(); // the ball is off the air: any run of pieces before this bounce is over
     game.vy = -Math.abs(game.vy);
     game.vx = 165 * (game.x - game.paddleX) / half + Math.sign(game.vx) * 55;
   }
