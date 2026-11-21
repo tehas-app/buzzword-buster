@@ -2,6 +2,7 @@
 // played on comes from brick-wall.js and the words from words.js; both are pure
 // and tested in node. This file is the part that needs a browser.
 import { wordsFrom } from "./words.js";
+import { createScoring } from "./scoring.js";
 
 const $ = (id) => document.getElementById(id);
 const calm = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -16,6 +17,9 @@ const W = canvas.width, H = canvas.height;
 const game = { mode: "ready", score: 0, lives: BALLS, time: ROUND_SECONDS, paddleX: W / 2, paddleW: 72, x: W / 2, y: H - 40, vx: 145, vy: -175, bricks: [] };
 let last = performance.now(), leftHeld = false, rightHeld = false;
 let debris = [], paddleFlash = 0;
+// Who scores what is scoring.js's business; this file only reports the events
+// of the round to it — a piece busted, the paddle touched, a ball thrown or lost.
+const scoring = createScoring();
 
 function gameUi(message) {
   $("brick-score").textContent = String(game.score).padStart(3, "0");
@@ -32,6 +36,10 @@ function resetGame() {
   // A new wall every round: other words, other tetrominoes, other places, and
   // never more pieces than the wall has room for (brick-wall.js).
   game.bricks = window.BUZZ_BRICK_WALL.build(words).map((piece) => ({ ...piece, alive: true }));
+  // wordKey is an index into this wall's own word list, so it recurs every
+  // round: the tracker that reads it is reset with the wall it scores, in this
+  // one function, so a bust of the new wall cannot be swallowed by the last one.
+  scoring.reset(); // and the ball of the new round is off the paddle, so its first word can combo
   $("brick-word").textContent = "NO WORD BUSTED YET";
   gameUi(`${ROUND_SECONDS} seconds, ${BALLS} balls.`);
 }
@@ -59,6 +67,7 @@ function stepGame(dt) {
   if (game.vy > 0 && game.y >= H - 32 && game.y <= H - 16 && Math.abs(game.x - game.paddleX) < half + 4) {
     game.y = H - 32;
     paddleFlash = 0.08;
+    scoring.paddleTouched(); // the ball is off the air: any run of pieces before this bounce is over
     game.vy = -Math.abs(game.vy);
     game.vx = 165 * (game.x - game.paddleX) / half + Math.sign(game.vx) * 55;
   }
@@ -77,17 +86,22 @@ function stepGame(dt) {
     const deepX = Math.min(game.x + 4 - hit.x, hit.x + hit.w - (game.x - 4));
     const deepY = Math.min(game.y + 4 - hit.y, hit.y + hit.h - (game.y - 4));
     if (deepX < deepY) game.vx *= -1; else game.vy *= -1;
-    // The word scores when its last piece goes, not at the first one.
-    if (game.bricks.every((o) => o.wordKey !== b.wordKey || !o.alive)) {
-      game.score += 10;
-      $("brick-word").textContent = `BUSTED: ${b.word.word.toUpperCase()} (${b.word.count}×)`;
+    // The word scores when its last piece goes, not at the first one, and the
+    // whole word on one ball is worth the combo: both decided in scoring.js.
+    const last = game.bricks.every((o) => o.wordKey !== b.wordKey || !o.alive);
+    const verdict = scoring.pieceBusted(b.wordKey, last, b.word);
+    if (verdict.busted) {
+      game.score += verdict.points;
+      $("brick-word").textContent = verdict.line;
     }
     break;
   }
   if (game.y > H + 8) {
     game.lives--;
     if (game.lives <= 0) return endGame("Out of balls.");
+    scoring.ballLost(); // the run the ball was on is over
     Object.assign(game, { x: game.paddleX, y: H - 40, vx: (Math.random() < 0.5 ? -1 : 1) * 145, vy: -175 });
+    scoring.ballInPlay(); // ... and a new one is thrown from the paddle
   }
   if (game.bricks.every((b) => !b.alive)) return endGame("Wall cleared.");
   gameUi();
