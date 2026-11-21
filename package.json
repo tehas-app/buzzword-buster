@@ -1,0 +1,14 @@
+{
+  "name": "buzzword-buster",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A 45 second breakout game whose bricks are buzzwords on tetrominoes.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node scripts/serve.mjs",
+    "test": "node --test test/*_test.mjs",
+    "smoke": "node scripts/smoke.mjs"
+  }
+}

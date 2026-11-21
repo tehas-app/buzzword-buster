@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Buzzword Buster</title>
+  <meta name="description" content="A 45 second breakout game. The bricks are buzzwords written on tetrominoes.">
+  <link rel="stylesheet" href="src/theme-pixel.css">
+  <link rel="stylesheet" href="src/game.css">
+  <script src="src/theme.js"></script>
+  <script src="src/brick-wall.js"></script>
+  <script type="module" src="src/game.js"></script>
+</head>
+<body>
+  <main class="stage">
+    <section class="break-room" aria-labelledby="break-title">
+      <div class="break-head">
+        <h1 id="break-title">BUZZWORD BUSTER</h1>
+        <p>45 seconds. 3 balls. No meeting required.</p>
+      </div>
+      <div class="cabinet">
+        <canvas id="brick-canvas" width="480" height="272" aria-label="Buzzword Buster. Steer the paddle with the arrow keys or a pointer."></canvas>
+        <div class="cabinet-side">
+          <p class="cabinet-help">Every brick is a buzzword on tetrominoes, shuffled every round. A word is busted when its last piece goes. Arrow keys or pointer to steer. P to pause.</p>
+          <dl class="readout">
+            <div><dt>SCORE</dt><dd id="brick-score">000</dd></div>
+            <div><dt>TIME</dt><dd id="brick-time">45</dd></div>
+            <div><dt>BALLS</dt><dd id="brick-lives">3</dd></div>
+          </dl>
+          <p class="cabinet-word" id="brick-word">NO WORD BUSTED YET</p>
+          <p class="cabinet-message" id="brick-message" role="status">Loading.</p>
+          <button class="button button-primary" id="brick-play" type="button" disabled>PLAY</button>
+          <p class="cabinet-source" id="brick-source"></p>
+        </div>
+      </div>
+    </section>
+    <p class="credit">PIXEL TYPE: <a href="https://github.com/rewtnull/amigafonts" target="_blank" rel="noopener noreferrer">TOPAZPLUS A1200</a>, TRUETYPE VERSION BY DMG OF TRUESCHOOL AND DIVINE STYLERS. TOPAZ IS COPYRIGHT AMIGAINC.</p>
+  </main>
+</body>
+</html>

@@ -1,0 +1,66 @@
+/* Pixel: a 16-bit arcade cabinet. Square corners, flat fills, hard shadows,
+   one bitmap typeface. See DESIGN.md.
+
+   This file sets every token; nothing else names a colour, a typeface or a
+   shadow. test/theme_test.mjs checks that the pages use no other token and
+   that every colour is twelve bits (#RGB). */
+
+@font-face {
+  font-family: Topaz;
+  src: url("../fonts/TopazPlus_a1200_v1.0.ttf") format("truetype");
+  font-display: block;
+}
+
+:root {
+  /* Type. Text is 16px and 32px: the layout counts on it. */
+  --font: Topaz, "Courier New", monospace;
+  --font-code: Topaz, "Courier New", monospace;
+  --font-smoothing: none;
+
+  /* The ground everything stands on. */
+  --field: #694;
+  --field-pattern: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' shape-rendering='crispEdges'%3E%3Cpath fill='%238a5' d='M16 24h8v8h-8zM24 16h8v8h-8zM88 80h8v8h-8zM96 72h8v8h-8zM64 8h8v8h-8zM32 104h8v8h-8z'/%3E%3C/svg%3E");
+
+  /* Faces of the objects on it. */
+  --surface: #eec;
+  --surface-quiet: #dca;
+  --surface-head: #ccd;
+  --accent: #ea3;
+  --accent-soft: #fc6;
+
+  /* Text. */
+  --text: #222;
+  --text-quiet: #445;
+  --text-cool: #276;
+
+  /* Lines. --edge is the width of every outline. */
+  --line: #111;
+  --edge: 4px;
+  --frame: var(--edge) solid var(--line);
+  --focus: 4px solid var(--text);
+
+  /* The dark screen of the cabinet. */
+  --screen: #111;
+
+  /* Depth: hard offset shadows, no blur. -up is the same object lifted. */
+  --shadow-card: 4px 4px 0 #333;
+  --shadow-card-up: 8px 8px 0 #333;
+  --shadow-sign: 8px 8px 0 #352;
+
+  /* Movement of what is pressed. */
+  --lift: translate(-4px, -4px);
+  --press: translate(4px, 4px);
+
+  /* Canvas colours. A canvas cannot read var(), so theme.js reads these. */
+  --piece-1: #fc6;
+  --piece-2: #ea3;
+  --piece-3: #7cb;
+  --piece-4: #ccd;
+  --piece-text: #144;
+  --game-ground: #222;
+  --game-floor: #445;
+  --game-shadow: #111;
+  --game-ball: #eec;
+  --game-paddle: #fc6;
+  --game-flash: #eec;
+}

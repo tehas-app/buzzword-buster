@@ -1,0 +1,2 @@
+# Full gate: the unit tests, then the page served whole.
+node --test test/*_test.mjs && node scripts/smoke.mjs

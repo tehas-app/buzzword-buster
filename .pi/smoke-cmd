@@ -1,0 +1,2 @@
+# The page and every file it names are served.
+node scripts/smoke.mjs

@@ -1,0 +1,2 @@
+# Fast gate: the unit tests. Node 22, no dependencies.
+node --test test/*_test.mjs

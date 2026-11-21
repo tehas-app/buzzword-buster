@@ -1,0 +1,7 @@
+# The preview: the game's files, served as they are. Nothing else.
+:8080 {
+	root * /srv/game
+	file_server
+	header Cache-Control no-store
+	header X-Robots-Tag "noindex, nofollow"
+}
