@@ -8,12 +8,15 @@ import { BEST_KEY, bestOf, readBest, recordScore, storedScore } from "../src/bes
 
 // A localStorage that answers from an object, and can be made to fail. A write
 // that fails leaves the box as it was, as a real one does when the quota is full.
+// `failing` is fixed for the whole box; `readsBlocked` can be flipped part-way
+// through a case, which is how a storage that dies mid-session is played out.
 const storage = (initial = {}, failing = null) => {
   const items = new Map(Object.entries(initial));
-  return {
+  const box = {
     items,
+    readsBlocked: failing === "read",
     getItem: (key) => {
-      if (failing === "read") throw new Error("storage is closed");
+      if (box.readsBlocked) throw new Error("storage is closed");
       return items.has(key) ? items.get(key) : null;
     },
     setItem: (key, value) => {
@@ -21,6 +24,7 @@ const storage = (initial = {}, failing = null) => {
       items.set(key, String(value));
     },
   };
+  return box;
 };
 
 test("a missing, empty or malformed stored value reads as no best", () => {
@@ -102,6 +106,64 @@ test("a score that is not a whole score neither is a best nor raises one", () =>
   assert.equal(recordScore(box, NaN), 100);
   assert.equal(recordScore(box, -5), 100);
   assert.equal(box.items.get(BEST_KEY), "100");
+});
+
+test("a round that does not beat the box leaves it alone, whatever the box holds", () => {
+  // The write is skipped, not made and then ignored: a box that would fail the
+  // write (a quota full, a disk gone) still answers for a round that has nothing
+  // to add to it.
+  for (const raw of ["100", "40"]) {
+    for (const failing of [null, "write"]) {
+      const box = storage({ [BEST_KEY]: raw }, failing);
+      // The page is shown the better of the box and this round; the box itself is
+      // untouched, which is the point of the case.
+      assert.equal(recordScore(box, 40), Number(raw), `stored ${raw}, failing ${String(failing)}`);
+      assert.equal(box.items.get(BEST_KEY), raw, `stored ${raw}, failing ${String(failing)}`);
+    }
+  }
+});
+
+test("a round that has nothing to add writes nothing, so a box cannot fail it", () => {
+  // recordScore runs once a round, at the end of it. The one thing it must not do
+  // is reach for setItem when the round did not beat the box — a browser whose
+  // quota is full then still answers for the round, and BEST keeps showing what
+  // the page has already played.
+  const box = storage({ [BEST_KEY]: "120" }, "write");
+  assert.equal(readBest(box), 120, "reading it is not an error either way");
+  assert.doesNotThrow(() => recordScore(box, 60), "a losing round never reaches the write");
+  assert.equal(box.items.get(BEST_KEY), "120");
+  // A round that does beat it reaches the write and is caught, not thrown.
+  assert.doesNotThrow(() => recordScore(box, 200));
+  assert.equal(recordScore(box, 200), 200, "and the page is still shown the better round");
+  assert.equal(box.items.get(BEST_KEY), "120", "while the box keeps what it holds");
+});
+
+test("a box nobody can read is left as it stands, and the round still plays", () => {
+  // The box is not there to be trusted, so nothing is written into it and nothing
+  // of it is believed. The round is still shown and counted: BEST falls back to
+  // the page's own rounds and the loop carries on.
+  const b = storage({ [BEST_KEY]: "150" });
+  let pageBest = 0;
+  const play = (score) => (pageBest = bestOf(pageBest, recordScore(b, score)));
+  assert.equal(play(90), 150, "while it answers, the box still sets the floor");
+  b.readsBlocked = true;
+  assert.equal(play(200), 200, "the page keeps the better round with nothing to hold it");
+  assert.equal(b.items.get(BEST_KEY), "150", "the box was not written over by a round that could not read it");
+  b.readsBlocked = false;
+  assert.equal(readBest(b), 150, "and the value it was holding is still there");
+  assert.equal(play(300), 300, "a round may raise it again from there");
+  assert.equal(b.items.get(BEST_KEY), "300");
+});
+
+test("only plain digits ever reach the box, whatever a caller hands in", () => {
+  // readBest reads back exactly what recordScore writes, so String() of anything
+  // other than a whole score must never get as far as setItem.
+  for (const score of [NaN, Infinity, -Infinity, 1e21, 12.5, "80", null, undefined, {}, [], true, false, -5, 0, 7, 999]) {
+    const box = storage();
+    recordScore(box, score);
+    const stored = box.items.get(BEST_KEY);
+    if (stored !== undefined) assert.match(stored, /^(0|[1-9][0-9]*)$/, `String(${String(score)}) leaked into the box`);
+  }
 });
 
 test("the best of this page's rounds outlives a storage that cannot hold it", () => {
