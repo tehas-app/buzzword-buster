@@ -14,11 +14,15 @@ const canvas = $("brick-canvas");
 const ctx = canvas.getContext("2d");
 const W = canvas.width, H = canvas.height;
 const game = { mode: "ready", score: 0, lives: BALLS, time: ROUND_SECONDS, paddleX: W / 2, paddleW: 72, x: W / 2, y: H - 40, vx: 145, vy: -175, bricks: [] };
+// The best of this page's rounds, kept here beside what localStorage holds: where
+// storage is unavailable the game still plays and BEST still shows this.
+const played = { best: 0 };
 let last = performance.now(), leftHeld = false, rightHeld = false;
 let debris = [], paddleFlash = 0;
 
 function gameUi(message) {
   $("brick-score").textContent = String(game.score).padStart(3, "0");
+  $("brick-best").textContent = String(bestNow()).padStart(3, "0");
   $("brick-time").textContent = String(Math.ceil(game.time)).padStart(2, "0");
   $("brick-lives").textContent = game.lives;
   const play = $("brick-play");
@@ -36,7 +40,30 @@ function resetGame() {
   gameUi(`${ROUND_SECONDS} seconds, ${BALLS} balls.`);
 }
 
-function endGame(message) { game.mode = "over"; gameUi(`${message} Score ${game.score}.`); }
+// The best of any round played in this browser: what localStorage holds and the
+// best of this page's own rounds, whichever is higher (best-score.js).
+const bestNow = () => BUZZ_BEST.bestOf(BUZZ_BEST.readBest(storage()), played.best);
+
+// The one place a round ends, so the one place a score becomes a best. A new
+// round keeps it: resetGame() has no part in it.
+function endGame(message) { game.mode = "over"; recordBest(); gameUi(`${message} Score ${game.score}.`); }
+
+function recordBest() {
+  const best = BUZZ_BEST.recordScore(storage(), game.score);
+  // What the storage answered with is no best of its own: only the higher of it
+  // and this round counts, so a box that cannot be read cannot lower what is shown.
+  played.best = BUZZ_BEST.bestOf(played.best, game.score, best);
+}
+
+// Where storage is unavailable (no localStorage, or a browser that answers with
+// an error for it), it is absent: the best of this page's rounds is what is left.
+function storage() {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
 
 function toggleGame() {
   if (!words.length) return;
